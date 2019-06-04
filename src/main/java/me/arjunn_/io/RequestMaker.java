@@ -28,15 +28,12 @@ public class RequestMaker extends Thread {
                     continue;
                 }
                 JSONObject request = new JSONObject();
-                request.put("type", "request");
                 request.put("event", "echo");
                 request.put("data", send);
-                request.put("responseID", UUID.randomUUID().toString());
-                System.out.println(request.getString("responseID"));
 
                 try {
                     long start = System.currentTimeMillis();
-                    String response = client.getStringFromServer(request).get(20, TimeUnit.MILLISECONDS);
+                    JSONObject response = client.sendRequest(request).getResponse();
                     System.out.println(response);
                     System.out.println("Response time: " + (System.currentTimeMillis() - start) + " milliseconds.");
                 } catch (Exception e) {

@@ -7,10 +7,7 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.net.Socket;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.Timer;
-import java.util.TimerTask;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 
 public class Client {
@@ -21,7 +18,7 @@ public class Client {
     private static PrintWriter out;
     private static BufferedReader in;
     private static ArrayList<JSONObject> queue = new ArrayList<>();
-    private static HashMap<String, CompletableFuture<String>> futuresToResolve = new HashMap<>();
+    public static HashMap<String, Request<JSONObject>> futuresToResolve = new HashMap<>();
 
     private static String username;
 
@@ -45,12 +42,10 @@ public class Client {
 
                     // Connect and Authenticate
                     JSONObject auth = new JSONObject();
-                    auth.put("type", "request");
                     auth.put("event", "connect");
                     auth.put("name", username);
                     auth.put("auth", "abc123");
-                    auth.put("responseID", "000");
-                    sendData(auth);
+                    sendRequest(auth);
 
                     // Clear queued items
                     for (JSONObject send : queue) {
@@ -95,15 +90,29 @@ public class Client {
         new RequestMaker(client).start();
     }
 
-    public CompletableFuture<String> getStringFromServer(JSONObject request) {
-        CompletableFuture<String> response = new CompletableFuture<>();
-        futuresToResolve.put(request.getString("responseID"), response);
+
+    public Request<JSONObject> sendRequest(JSONObject request) {
+
+        Request<JSONObject> response = new Request<>();
+        request.put("type", "request");
+        request.put("responseID", UUID.randomUUID().toString());
+        Client.futuresToResolve.put(request.getString("responseID"), response);
 
         sendData(request);
 
         return response;
 
     }
+
+    public void sendResponse(JSONObject received, JSONObject response) {
+
+        response.put("type", "response");
+        response.put("responseID", received.getString("responseID"));
+
+        sendData(response);
+
+    }
+
 
     public void sendData(JSONObject object) {
         if (socket != null && socket.isConnected()) {
@@ -122,30 +131,42 @@ public class Client {
         }
     }
 
-    public static void handle(JSONObject sent) {
+    public static void handle(JSONObject received) {
 
-        String type = sent.getString("type");
-        String event = sent.getString("event");
-        String responseID = sent.getString("responseID");
-
-
-        if (type.equals("request")) {
-            if (event.equals("echo")) {
-                JSONObject response = new JSONObject();
-                response.put("type", "response");
-                response.put("event", "echo");
-                response.put("data", sent.getString("data"));
-                response.put("responseID", sent.getString("responseID"));
-                client.sendData(response);
-            }
+        if (!received.has("type")) {
+            System.out.println("Received data with no type - ignoring. " + received);
+            return;
         }
 
-        System.out.println("Received data: " + sent);
+        String type = received.getString("type");
 
-        if (sent.has("responseID")) {
-            if (futuresToResolve.containsKey(sent.getString("responseID"))) {
-                futuresToResolve.get(sent.getString("responseID")).complete(sent.getString("data"));
+        if (type.equals("response")) {
+            if (!received.has("responseID")) {
+                System.out.println("Received response without a responseID - ignoring. " + received);
+            } else if (futuresToResolve.containsKey(received.getString("responseID"))) {
+                futuresToResolve.get(received.getString("responseID")).setResponse(received);
+                futuresToResolve.remove(received.getString("responseID"));
+            } else {
+                System.out.println("Got a response for a non-existant request! Request either never existed or has timed out." + received );
             }
+            return;
+        }
+
+        if (!received.has("event")) {
+            System.out.println("Received a request without an event: " + received);
+            return;
+        }
+
+        // Received a valid request
+        String event = received.getString("event");
+
+        // Begin handling based on event name
+
+        if (event.equalsIgnoreCase("echo" )) {
+            JSONObject response = new JSONObject();
+            response.put("event", "echo");
+            response.put("data", received.getString("data"));
+            client.sendResponse(received, response);
         }
 
     }
